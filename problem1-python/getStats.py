@@ -3,7 +3,7 @@ import os, re, sys
 from lib import traverse
 
 # Ensure script is invoked correctly
-if len(sys.argv)!=2:
+if len(sys.argv) != 2:
   print "Error. Invoke: python getStats.py directory"
   exit(1);
 
