@@ -14,6 +14,7 @@ Problem 1
 2. python getStats.py testcases
 
 Notes:
+- Python version: 2.7.5
 - First argument of getStats.py is the directory to examine
 
 
@@ -25,6 +26,7 @@ Problem 2
 4. java ServerParallel rotate.txt
 
 Notes:
+- Java version: 1.7.0_10
 - Server.java is the course provided sequential solution
 - ServerParallel.java is the concurrent solution
 
