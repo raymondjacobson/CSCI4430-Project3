@@ -9,12 +9,14 @@ class constants {
     public static final int num_letters = 26;
 }
 
-class TransactionAbortException extends Exception {}
 // this is intended to be caught
-class TransactionUsageError extends Error {}
+class TransactionAbortException extends Exception {}
+
 // this is intended to be fatal
-class InvalidTransactionError extends Error {}
+class TransactionUsageError extends Error {}
+
 // bad input; will have to skip this transaction
+class InvalidTransactionError extends Error {}
 
 class Account {
     private int value = 0;
