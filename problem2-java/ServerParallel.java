@@ -144,9 +144,9 @@ class Worker
   boolean[] write_accounts = new boolean[num_letters];
   boolean[] open_accounts = new boolean[num_letters];
 
+  // Initialize starting values for all accounts
   private void resetAccounts()
   {
-    // Initialize starting values for all accounts
     for (int i = 0; i < num_letters; ++i)
     {
       read_accounts[i] = false;
@@ -215,9 +215,9 @@ class Worker
     return rtn;
   }
 
+  // Open accounts for reading & writing
   private void tryOpeningAccounts() throws TransactionAbortException
   {
-    // Open accounts for reading & writing
     for (int k = 0; k < num_letters; k++)
     {
       if (read_accounts[k])
@@ -237,9 +237,10 @@ class Worker
     }
   }
 
+
+  // Close down all open accounts
   private void closeOpenAccounts(boolean close_write)
   {
-    // Close down all open accounts
     for (int k = 0; k < num_letters; k++)
     {
       if (open_accounts[k])
@@ -257,6 +258,7 @@ class Worker
     }
   }
 
+  // execute the transactions concurrently
   public void run()
   {
     // Tokenize transaction
@@ -354,6 +356,7 @@ public class ServerParallel
   // Initialize ExecutorService using newCachedThreadPool threading algo
   private static ExecutorService executor = Executors.newCachedThreadPool();
 
+  // print out account values
   private static void dumpAccounts() {
     // output values:
     for (int i = A; i <= Z; ++i) {
