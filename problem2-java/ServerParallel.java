@@ -1,11 +1,12 @@
 import java.io.*;
 import java.lang.Thread.*;
+import java.util.concurrent.*;
 import java.util.HashSet;
 
 class constants {
     public static final int A = 0;
     public static final int Z = 25;
-    public static final int numLetters = 26;
+    public static final int num_letters = 26;
 }
 
 class TransactionAbortException extends Exception {}
@@ -15,8 +16,6 @@ class TransactionUsageError extends Error {}
 class InvalidTransactionError extends Error {}
 // bad input; will have to skip this transaction
 
-// TO DO: you are not permitted to modify class Account
-//
 class Account {
     private int value = 0;
     private Thread writer = null;
@@ -30,7 +29,7 @@ class Account {
     private void delay() {
         try {
             Thread.sleep(100);  // ms
-        } catch(InterruptedException e) {}
+        } catch(InterruptedException executor) {}
             // Java requires you to catch that
     }
 
@@ -47,9 +46,6 @@ class Account {
         }
     }
 
-    // TO DO: the sequential version does not call this method,
-    // but the parallel version will need to.
-    //
     public void verify(int expectedValue)
         throws TransactionAbortException {
         delay();
@@ -75,9 +71,6 @@ class Account {
         }
     }
 
-    // TO DO: the sequential version does not open anything for reading
-    // (verifying), but the parallel version will need to.
-    //
     public void open(boolean forWriting)
         throws TransactionAbortException {
         delay();
@@ -126,143 +119,320 @@ class Account {
         System.out.format("%11d", new Integer(value));
     }
 
-    // print value % numLetters (indirection value) in 2 columns
+    // print value % num_letters (indirection value) in 2 columns
     public void printMod() {
-        int val = value % constants.numLetters;
+        int val = value % constants.num_letters;
         if (val < 10) System.out.print("0");
         System.out.print(val);
     }
 }
 
-// TO DO: Worker is currently an ordinary class.
-// You will need to movify it to make it a task,
-// so it can be given to an Executor thread pool.
-//
-class Worker {
-    private static final int A = constants.A;
-    private static final int Z = constants.Z;
-    private static final int numLetters = constants.numLetters;
+class Worker
+{
+  private static final int A = constants.A;
+  private static final int Z = constants.Z;
+  private static final int num_letters = constants.num_letters;
 
-    private Account[] accounts;
-    private String transaction;
+  private Account[] accounts;
+  private String transaction;
 
-    // TO DO: The sequential version of Worker peeks at accounts
-    // whenever it needs to get a value, and opens, updates, and closes
-    // an account whenever it needs to set a value.  This won't work in
-    // the parallel version.  Instead, you'll need to cache values
-    // you've read and written, and then, after figuring out everything
-    // you want to do, (1) open all accounts you need, for reading,
-    // writing, or both, (2) verify all previously peeked-at values,
-    // (3) perform all updates, and (4) close all opened accounts.
+  // Keep data about open, reading, writing on each account
+  int[] cache = new int[num_letters];
+  boolean[] read_accounts = new boolean[num_letters];
+  boolean[] write_accounts = new boolean[num_letters];
+  boolean[] open_accounts = new boolean[num_letters];
 
-    public Worker(Account[] allAccounts, String trans) {
-        accounts = allAccounts;
-        transaction = trans;
+  private void resetAccounts()
+  {
+    // Initialize starting values for all accounts
+    for (int i = 0; i < num_letters; ++i)
+    {
+      read_accounts[i] = false;
+      open_accounts[i] = false;
+      write_accounts[i] = false;
+      cache[i] = 0;
     }
-    
-    // TO DO: parseAccount currently returns a reference to an account.
-    // You probably want to change it to return a reference to an
-    // account *cache* instead.
-    //
-    private Account parseAccount(String name) {
-        int accountNum = (int) (name.charAt(0)) - (int) 'A';
-        if (accountNum < A || accountNum > Z)
+  }
+
+  public Worker(Account[] allAccounts, String trans)
+  {
+    accounts = allAccounts;
+    transaction = trans;
+    resetAccounts();
+  }
+
+  // Find account number and return as int
+  private int parseAccount(String name)
+  {
+    int account_number = (int) (name.charAt(0)) - (int) 'A';
+
+    if (account_number < A || account_number > Z)
+    {
+      throw new InvalidTransactionError();
+    }
+
+    for (int i = 1; i < name.length(); ++i)
+    {
+      if (name.charAt(i) != '*')
+      {
+        throw new InvalidTransactionError();
+      }
+
+      account_number = (accounts[account_number].peek() % num_letters);
+    }
+
+    // Return index of account as opposed to reference (working with indices)
+    return account_number;
+  }
+
+  // Return cached account value or number and set flag
+  private int parseAccountOrNum(String name)
+  {
+    int rtn = 0;
+
+    if (name.charAt(0) >= '0' && name.charAt(0) <= '9')
+    {
+      rtn = new Integer(name).intValue();
+    }
+    else
+    {
+      rtn = parseAccount(name);
+
+      try
+      {
+        cache[rtn] = accounts[rtn].peek();
+        read_accounts[rtn] = true;
+        rtn = cache[rtn];
+      }
+      catch (TransactionUsageError transaction_usage_error)
+      {
+        System.err.println("failure to peek at parseAccountOrNum");
+      }
+    }
+
+    return rtn;
+  }
+
+  private void tryOpeningAccounts() throws TransactionAbortException
+  {
+    // Open accounts for reading & writing
+    for (int k = 0; k < num_letters; k++)
+    {
+      if (read_accounts[k])
+      {
+        if (write_accounts[k])
+        {
+          accounts[k].open(true);
+          open_accounts[k] = true;
+        }
+        else
+        {
+          accounts[k].open(false);
+          open_accounts[k] = true;
+          accounts[k].verify(cache[k]);
+        }
+      }
+    }
+  }
+
+  private void closeOpenAccounts(boolean close_write)
+  {
+    // Close down all open accounts
+    for (int k = 0; k < num_letters; k++)
+    {
+      if (open_accounts[k])
+      {
+        accounts[k].close();
+        open_accounts[k] = false;
+
+        // Check if we are closing the write account also
+        if (close_write)
+        {
+          write_accounts[k] = false;
+        }
+
+      }
+    }
+  }
+
+  public void run()
+  {
+    // Tokenize transaction
+    String[] commands = transaction.split(";");
+
+    for (int i = 0; i < commands.length; ++i)
+    {
+      String[] words = commands[i].trim().split("\\s");
+
+      if (words.length < 3)
+      {
+        throw new InvalidTransactionError();
+      }
+
+      // Flag to signal transaction quit
+      int transaction_quit = 1;
+
+      // Init lhs (acct to be modified) and rhs (0 for safety)
+      int rhs = 0;
+      int lhs = parseAccount(words[0]);
+      write_accounts[lhs] = true;
+
+      while (transaction_quit == 1)
+      {
+        transaction_quit = 0;
+        // Peek at lhs, cache, and denote as readable
+        try
+        {
+          cache[lhs] = accounts[lhs].peek();
+          read_accounts[lhs] = true;
+        }
+        catch (TransactionUsageError tue)
+        {
+          System.err.println("Failure to peek on lhs");
+        }
+
+        // Check syntax of transaction for correctness
+        if (!words[1].equals("="))
+        {
+          throw new InvalidTransactionError();
+        }
+
+        // Get account number after equals sign in transaction
+        rhs = parseAccountOrNum(words[2]);
+
+        // Check operations
+        for (int j = 3; j < words.length; j+=2)
+        {
+          if (words[j].equals("+"))
+            rhs += parseAccountOrNum(words[j+1]);
+          else if (words[j].equals("-"))
+            rhs -= parseAccountOrNum(words[j+1]);
+          else
             throw new InvalidTransactionError();
-        Account a = accounts[accountNum];
-        for (int i = 1; i < name.length(); i++) {
-            if (name.charAt(i) != '*')
-                throw new InvalidTransactionError();
-            accountNum = (accounts[accountNum].peek() % numLetters);
-            a = accounts[accountNum];
         }
-        return a;
+
+        try
+        {
+          tryOpeningAccounts();
+        }
+        catch (TransactionAbortException transaction_abort_exception)
+        {
+          // Set transaction quit because we have failed verification
+          transaction_quit = 1;
+          // No need to close write accounts
+          closeOpenAccounts(false);
+        }
+      }
+
+      // Try to write determined value to lhs
+      try
+      {
+        accounts[lhs].update(rhs);
+      }
+      catch (TransactionUsageError tue)
+      {
+        System.err.println("Failure to update account");
+      }
+
+      // Close down all open accounts (write included)
+      closeOpenAccounts(true);
     }
 
-    private int parseAccountOrNum(String name) {
-        int rtn;
-        if (name.charAt(0) >= '0' && name.charAt(0) <= '9') {
-            rtn = new Integer(name).intValue();
-        } else {
-            rtn = parseAccount(name).peek();
-        }
-        return rtn;
-    }
-
-    public void run() {
-        // tokenize transaction
-        String[] commands = transaction.split(";");
-
-        for (int i = 0; i < commands.length; i++) {
-            String[] words = commands[i].trim().split("\\s");
-            if (words.length < 3)
-                throw new InvalidTransactionError();
-            Account lhs = parseAccount(words[0]);
-            if (!words[1].equals("="))
-                throw new InvalidTransactionError();
-            int rhs = parseAccountOrNum(words[2]);
-            for (int j = 3; j < words.length; j+=2) {
-                if (words[j].equals("+"))
-                    rhs += parseAccountOrNum(words[j+1]);
-                else if (words[j].equals("-"))
-                    rhs -= parseAccountOrNum(words[j+1]);
-                else
-                    throw new InvalidTransactionError();
-            }
-            try {
-                lhs.open(true);
-            } catch (TransactionAbortException e) {
-                // won't happen in sequential version
-            }
-            lhs.update(rhs);
-            lhs.close();
-        }
-        System.out.println("commit: " + transaction);
-    }
+    System.out.println("commit: " + transaction);
+  }
 }
 
-public class Server {
-    private static final int A = constants.A;
-    private static final int Z = constants.Z;
-    private static final int numLetters = constants.numLetters;
-    private static Account[] accounts;
+public class ServerParallel
+{
+  private static final int A = constants.A;
+  private static final int Z = constants.Z;
+  private static final int num_letters = constants.num_letters;
+  private static Account[] accounts;
 
-    private static void dumpAccounts() {
-        // output values:
-        for (int i = A; i <= Z; i++) {
-            System.out.print("    ");
-            if (i < 10) System.out.print("0");
-            System.out.print(i + " ");
-            System.out.print(new Character((char) (i + 'A')) + ": ");
-            accounts[i].print();
-            System.out.print(" (");
-            accounts[i].printMod();
-            System.out.print(")\n");
-        }
+  // Initialize ExecutorService using newCachedThreadPool threading algo
+  private static ExecutorService executor = Executors.newCachedThreadPool();
+
+  private static void dumpAccounts() {
+    // output values:
+    for (int i = A; i <= Z; ++i) {
+      System.out.print("    ");
+      if (i < 10) System.out.print("0");
+      System.out.print(i + " ");
+      System.out.print(new Character((char) (i + 'A')) + ": ");
+      accounts[i].print();
+      System.out.print(" (");
+      accounts[i].printMod();
+      System.out.print(")\n");
+    }
+  }
+
+  public static void main (String args[]) throws IOException
+  {
+    accounts = new Account[num_letters];
+    for (int i = A; i <= Z; ++i)
+    {
+      accounts[i] = new Account(Z-i);
     }
 
-    public static void main (String args[])
-        throws IOException {
-        accounts = new Account[numLetters];
-        for (int i = A; i <= Z; i++) {
-            accounts[i] = new Account(Z-i);
-        }
+    // Read transactions from input file
+    String line;
+    BufferedReader input = new BufferedReader(new FileReader(args[0]));
 
-        // read transactions from input file
-        String line;
-        BufferedReader input =
-            new BufferedReader(new FileReader(args[0]));
+    // Begin attempt to execute concurrent transactions
+    while ((line = input.readLine()) != null)
+    {
 
-// TO DO: you will need to create an Executor and then modify the
-// following loop to feed tasks to the executor instead of running them
-// directly.  Don't modify the initialization of accounts above, or the
-// output at the end.
+      // Make 'final' version of line to pass into inner runnable
+      final String final_line = line;
 
-        while ((line = input.readLine()) != null) {
-            Worker w = new Worker(accounts, line);
-            w.run();
-        }
+      // Container class for worker run
+      Runnable worker_runnable = new Runnable()
+      {
+          public void run()
+          {
+              try
+              {
+                  Worker w = new Worker(accounts, final_line);
+                  w.run();
+              }
+              catch (InvalidTransactionError invalid_transaction_error)
+              {
+                  System.err.println(final_line + " created an invalid transaction error!");
+              }
+          }
+      };
 
-        System.out.println("final values:");
-        dumpAccounts();
+      executor.execute(worker_runnable);
     }
+
+    // Cleanly kill threadpool when finished with transactions
+    executor.shutdown();
+
+    // Check up on tasks and try to wait for them to finish
+    try
+    {
+      // Give current task decent time to finish execution
+      if (!executor.awaitTermination(30, TimeUnit.SECONDS))
+      {
+        // Force shut down if task takes too long
+        executor.shutdownNow();
+
+        // If shut down, wait for task to be properly cleared
+        if (!executor.awaitTermination(15, TimeUnit.SECONDS))
+        {
+          System.err.println("Executor never shut down");
+        }
+      }
+    }
+    catch (InterruptedException interrupted_exception)
+    {
+      // Force shut down task if it is interrupted
+      executor.shutdownNow();
+    }
+
+    // Each task has either successfully or unsuccessfully executed
+    // Proceed to print of final values
+    System.out.println("final values:");
+    dumpAccounts();
+  }
 }
